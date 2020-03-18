@@ -1,0 +1,4 @@
+FROM openjdk:8
+ADD target/SpringBootRestApiExample-1.0.0.jar SpringBootRestApiExample-1.0.0.jar
+EXPOSE 8080
+ENTRYPOINT ["java", "-jar", "SpringBootRestApiExample-1.0.0.jar"]
