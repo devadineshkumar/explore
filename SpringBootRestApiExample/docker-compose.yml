@@ -1,0 +1,19 @@
+version : "3"
+services:
+  springboot:
+    image: springboot
+    ports: 
+      - "8080:8080"
+    networks:
+      - springboot-network
+  react-app:
+    image: myapp
+    ports:
+      - "3000:3000"
+    networks:
+      - reactapp-network
+
+networks:
+  springboot-network:
+  reactapp-network:
+
