@@ -1,0 +1,24 @@
+<table class="table table-dark table-striped">
+    <thead>
+        <td>Product Name</td>
+        <td>Product Price</td>
+        <td>Product Amount</td>
+        <td>Product Name</td>
+        <td>Total</td>
+        <td>Options</td>
+    </thead>
+    <tbody>
+        <tr *ngFor="let item of cartItems; index as i" >
+            <td>{{item.name}}</td>
+            <td>{{item.price | currency}}</td>
+            <td><input  min="0" type="number" name="" id="" placeholder="Input your quantity" [(ngModel)]="item.amount" ></td>
+            <td>
+                {{ item.price * item.amount | currency:'USD' }}
+            </td>
+            <td>
+                <button class="btn btn-primary" (click)="updateAmount(i)">Update</button>
+                <button class="btn btn-danger" (click)="deleteCartItem(i)" >Delete</button>
+            </td>
+        </tr>
+    </tbody>
+</table>

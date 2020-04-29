@@ -1,0 +1,20 @@
+<div class="body">
+    <div class="row">
+        <div class="col col-12 col-md-6 col-lg-3" *ngFor="let p of Products;let i=index;">
+            <div class="card" style="width: 18rem;">
+                <img class="card-img-top" [src]="p.ProductPath" alt="Card image cap">
+                <div class="card-body">
+                    <h5 class="card-title">{{p.Name | titlecase }}</h5>
+                    <p class="card-text">{{p.Description}}</p>
+                    <p class="card-text">{{p.Price | currency:'USD':'symbol':'2.2-2'}}</p>
+                    <button *ngIf="add != i" class="btn btn-primary" (click)="addToCart(i)">Add To Cart</button>
+                    <div *ngIf="add === i">
+                        <input type="number" name="amount" class="form-control" placeholder="Input amount in KGs"
+                            #amount id="amount">
+                        <button class="btn btn-primary" (click)="buy(amount.value)">Buy</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
