@@ -33,7 +33,6 @@ export class HomeComponent implements OnInit {
   }
 
   addToCart(index:number) {
-    console.log("Added product: ",index);
     if(this.as.userId) {
       this.add = +index;
     } else {
@@ -44,7 +43,6 @@ export class HomeComponent implements OnInit {
   buy(amount: number) {
 
     let productToBuy = this.Products[this.add];
-    console.log(productToBuy.Name);
     let data = {
       name: productToBuy.Name,
       price : productToBuy.Price,

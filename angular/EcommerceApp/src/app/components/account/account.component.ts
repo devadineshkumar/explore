@@ -27,7 +27,6 @@ export class AccountComponent implements OnInit {
           ...x.payload.doc.data()  as {}
         }
       })
-      console.log("product array : ", this.productArray);
     });
   }
 
@@ -36,7 +35,6 @@ export class AccountComponent implements OnInit {
     let name = form.value.name;
     let price = form.value.price;
     let image = (this.image.nativeElement as HTMLInputElement).files[0];
-    console.log(image);
     this.ps.addNewProduct(name, price, image);
 
   }

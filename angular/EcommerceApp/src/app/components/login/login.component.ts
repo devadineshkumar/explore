@@ -21,7 +21,6 @@ export class LoginComponent implements OnInit {
 
     if (form.valid) {
       this.auth.login(form.value.email, form.value.password).then(data => {
-        console.log("data login  ", data);
         this.router.navigateByUrl('/');
        // this.auth.user = data;
       }).catch(err => {

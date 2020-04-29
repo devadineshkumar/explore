@@ -17,7 +17,6 @@ export class CartComponent implements OnInit {
   ngOnInit(): void {
     
     this.cart.getCart().subscribe(cs => {
-      console.log("Length of carts ", cs[0].payload.doc.data());
       this.cartItems = cs.map(x => {
         return {   
           id : x.payload.doc.id ,
@@ -25,7 +24,6 @@ export class CartComponent implements OnInit {
       }
       });
     });
-    console.log("Shopping cart items... ", this.cartItems); 
   }
 
   deleteCartItem(index: number) {
@@ -33,7 +31,6 @@ export class CartComponent implements OnInit {
   }
 
   updateAmount(index: number) {
-    console.log("Update quantity in cart.");
     this.cart.updateAmount(this.cartItems[index].id, this.cartItems[index].amount );
   }
 

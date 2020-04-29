@@ -12,7 +12,6 @@ export class AuthService {
   userId : string = '';
 
   constructor(private fAuth: AngularFireAuth) {
-    console.log("FAuth constructor user instance : ", fAuth.user);
     this.user = fAuth.user;
 
   }

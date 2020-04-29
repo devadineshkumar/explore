@@ -45,14 +45,7 @@ import { AngularFirestore, AngularFirestoreModule } from '@angular/fire/firestor
     FormsModule,
     AngularFireModule.initializeApp(
       {
-        apiKey: "AIzaSyCAr6kmJkudhnywvLHLDe4rlOAy3LTg09c",
-        authDomain: "ecommerceapp-4df85.firebaseapp.com",
-        databaseURL: "https://ecommerceapp-4df85.firebaseio.com",
-        projectId: "ecommerceapp-4df85",
-        storageBucket: "ecommerceapp-4df85.appspot.com",
-        messagingSenderId: "97377175772",
-        appId: "1:97377175772:web:5a26a4a583eb20034b0c19",
-        measurementId: "G-Y55WKT8YQE"
+        
       }
     ),
     AngularFirestoreModule,
