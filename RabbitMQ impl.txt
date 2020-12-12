@@ -1,0 +1,356 @@
+Contents
+1. Deployment Guide	3
+1.1	Creating custom image of RabbitMQ image	3
+1.2	SSL configuration	4
+2. Rabbit MQ Best Practices	4
+2.1 Configuration properties	4
+2.1.1 Common Properties	4
+2.1.2 Consumer properties	6
+2.1.3 Producer properties	7
+2.1.4 Consumer exception handling	7
+2.1.5 TTL(Time to Live)	8
+2.1.6 Producer Implementation	8
+2.1.7 Consumer Implementation	9
+2.2 Queue Creation and Properties	10
+2.3 Reading DLQ Messages and exceptions	10
+2.4 Ordering	10
+2.5 Prefetch Message	11
+2.7 Exchange Types	11
+2.8 Add exchanges on startup	14
+2.9 Content based stream messaging	14
+3. Producer guidelines	14
+4. Consumer guidelines	15
+5. RabbitMQ deployment	15
+1.1 Containerization of RabbitMQ.	15
+Deploy or running RabbitMQ image in docker.	16
+
+
+
+
+
+1. Deployment Guide
+
+1.1	Creating custom image of RabbitMQ image
+
+RabbitMQ images is available in the docker hub. We can download the any
+
+Below is the File content for building docker image with management console. 
+              FROM rabbitmq:3.8
+	
+
+	RUN rabbitmq-plugins enable --offline rabbitmq_management
+	
+
+	# extract "rabbitmqadmin" from inside the "rabbitmq_management-X.Y.Z.ez" plugin zipfile
+	# see https://github.com/docker-library/rabbitmq/issues/207
+	RUN set -eux; \
+		erl -noinput -eval ' \
+			{ ok, AdminBin } = zip:foldl(fun(FileInArchive, GetInfo, GetBin, Acc) -> \
+				case Acc of \
+					"" -> \
+						case lists:suffix("/rabbitmqadmin", FileInArchive) of \
+							true -> GetBin(); \
+							false -> Acc \
+						end; \
+					_ -> Acc \
+				end \
+			end, "", init:get_plain_arguments()), \
+			io:format("~s", [ AdminBin ]), \
+			init:stop(). \
+		' -- /plugins/rabbitmq_management-*.ez > /usr/local/bin/rabbitmqadmin; \
+		[ -s /usr/local/bin/rabbitmqadmin ]; \
+		chmod +x /usr/local/bin/rabbitmqadmin; \
+		apt-get update; apt-get install -y --no-install-recommends python; rm -rf /var/lib/apt/lists/*; \
+		rabbitmqadmin --version
+	
+
+	EXPOSE 15671 15672
+
+Save the content in Dockerfile. Run docker build command to create an image.
+docker build -f Dockerfile -t custom-rabbitmq:custom-rabbitmq .
+
+Run below command to start RabbitMQ container.
+
+docker run -d --name customrabbitmq_customrabbitmq -p 5672:5672 -p 15672:15672 -p 25672:25672 custom-rabbitmq:custom-rabbitmq
+
+1.2	SSL configuration
+
+
+2. Rabbit MQ Best Practices
+
+2.1 Configuration properties
+
+2.1.1 Common Properties
+Common properties for producer and consumer. 
+RabbitMQ Broker properties:
+spring.rabbitmq.host = Hostname or IP of RabbitMQ broker.
+spring.rabbitmq.port = By default port 5672
+#Default RabbitMQ username/password is guest/guest.
+spring.rabbitmq.username = guest (Default admin user is guest).
+spring.rabbitmq.password = guest (Password of guest user is guest).
+Above properties to connect to the RabbitMQ Broker to publish message or receive a message. Using this Producer and Consumer connect to the RabbitMQ Broker. Default TCP port number 5672 exposed to connect to RabbitMQ server. If docker deployment is done make sure that port number which is mapped to outside work is used here to connect to the broker server.
+ Channel Name: 
+Channel Name represents the AMQP connection to interact with the exchange inside the RabbitMQ server. Channel name is common in producer and consumer to establish a connection to the RabbitMQ server. This channel has additional properties to exactly talk to RabbitMQ to exchange message. The created channel can be used as both producer or consumer or both together. A simple channel is enough to send and receive messages into RabbitMQ server. The RabbitMQ will create a dynamic exchange and queue.
+Exchange: 
+Exchange is router which receives a message from producer channel and pass or route the message to the appropriate queues. Exchange reads the message header or properties to which queue it should assign a message and push the message to the queue.
+Queue: 
+Queue is a normal queue which can be durable or non-durable(auto-delete) depend upon the configuration. Exchange push the message to the queue and queue publish those messages to the consumer. Consumer receives the message.
+
+The Best practice for development, to provide channel name meaningful and add specific exchange and queue group names to understand by everyone.
+Producer and consumer common properties like destination, group.
+spring.cloud.stream.bindings.<Channel-Name>.*****(Adding other properties)
+Channel-Name: Is a custom and unique mapping name for spring to initialize messaging channel or subscriber channel.
+spring.cloud.stream.bindings.<Channel-Name>.destination : <Exchange_Name>
+ Specify the exchange name to publish the message. By default, the exchange created will be Topic type.
+spring.cloud.stream.bindings.<Channel-Name>.group :<Group_Name>.
+Mention the group name. Group name is to create a multiple consumer into single group. When a group of consumers looking for a message from an exchange, if a message arrived will publish to only one of consumer in the group(in round robin). This will help in docker deployment with multiple instances where anyone of the consumer will receive a message.
+In general, it is preferable to always specify a consumer group when binding an application to a given exchange. When scaling up a Spring Cloud Stream application, a consumer group must be specified for each of its input bindings, in order to prevent its instances from receiving duplicate messages (unless that behaviour is desired, which is a less common use case).
+Note: If the producer started and publish the message without consumer it will be lost, If the consumer initiated durable queue first then publisher messages will be persistent until consumer consume it.
+
+2.1.2 Consumer properties
+
+Consumers must have the common properties. In order to customize the consumer behaviour, it needs additional properties. Below are the addition properties as per the best practices.
+Configuring spring.cloud.stream.bindings.< Consumer-Channel_name> properties.
+1. spring.cloud.stream.bindings.<Consumer-Channel-Name>.consumer.max-attempt
+Retry attempt to deliver a message(Default 3 can be configurable as required).
+
+2. spring.cloud.stream.bindings.<Consumer-Channel-Name>.consumer.requeue-rejected
+By default, value is false. If we made it true, the failed message will be requeue to same consumer. This will make a recursive call to same consumer, to Stop it throw AmqpRejectAndDontRequeueException exception to stop requeue process. When this AmqpRejectAndDontRequeueException exception thrown Message will be pushed into errorchannel or DLQ.
+
+Configuring spring.cloud.stream.rabbit.bindings.<Consumer-Channel-Name > properties:
+
+3. spring.cloud.stream.rabbit.bindings.<Consumer-Channel-Name>.consumer.auto-bind-dlq
+By default, value is false. If we made it true, RabbitMQ create a new queue with name of adding suffix of “dlq” from existing queue name and start catching the failure messages to deliver to consumer. This will helpful in logging and error catching and analysis purpose.
+4. spring.cloud.stream.rabbit.bindings.<Consumer-Channel-Name>.consumer.dlq-ttl
+Time to Live (ttl) is time duration of a message stay in the queue. If the time elapse the message will be dequeued from the messaging queue. The message will be dequeue from the queue even through it is not delivered.
+5. spring.cloud.stream.rabbit.bindings.<Consumer-Channel-Name>.consumer.dlq-expires
+This property enables the DLQ queue to be deleted when it is idle for configured milliseconds.
+6. spring.cloud.stream.rabbit.bindings.<Consumer-Channel-Name>.consumer.republish-to-dlq
+Property to enable republish the failed message with stack trace. This will help in analysing the root cause of the issue.
+
+2.1.3 Producer properties
+
+Like consumers, producers must have common properties destination and group.
+
+2.1.4 Consumer exception handling
+
+Consumer receives a message and not able to process successfully then it is an exception or error to be captured. This error can be handled in two ways.
+
+
+
+1. Handling through error channels
+Consumer establish a connection with exchange to listen messages, at the same time an errorChannel is created in the AMQP internally to publish failed messages or errored messages. Error channel name will be “errorChannel” or if we are providing destination & group then “<consumer-channel-destination>.<consumer-channel-group>.errors”. If we listen to this channel for error messages, will get type of ErrorMessage with stack trace and original message to be delivered. This will help in analysis of the error and we will not lose the original messages. 
+2. Enabling Dead Letter Queue(DLQ)
+Dead Letter Queue is a queue where the errored messages will be pushed into this automatically when we enable auto-bind-dlq. If we enable RabbitMQ broker itself will create a new queue with the name of existing queue name and append “.dlq” at the end. This is a queue is created under the same exchange and any error messaged will be pushed into this queue. For this queue will also have the same characteristics as auto-delete, durable and ttl. This queue properties will be inherited from the original queue.
+
+By default, this dlq queue will be mapped to exchange of DLX. DLX is a default exchange where all the failed messages will be pushed, and it will redirect to the appropriate messages to relevant dlq queues.
+
+We can also declare properties to create a separate DLX exchange and queue name to redirect the error messages to specific queue. Below are the properties to declare custom exchange and queue for a DLQ.
+
+spring.cloud.stream.rabbit.bindings.<consumer-channel-name>.consumer.dead-letter-exchange=decisionevent_dlq
+
+spring.cloud.stream.rabbit.bindings.<consumer-channel-name>.consumer.dead-letter-queue-name=decisioneventDlqQueue
+
+2.1.5 TTL(Time to Live)
+
+RabbitMQ allows you to set TTL (time to live) for both messages and queues. This can be done using optional queue arguments or policies (the latter option is recommended). Message TTL can be applied to a single queue, a group of queues or applied on the message-by-message basis. Best practices to configure a DLQ queue with time to live. By default, normal queue will be declared with ttl by RabbitMQ broker.
+
+
+2.1.6 Producer Implementation
+
+Step 1. Create function interface to initiate MessageChannel.
+
+
+import org.springframework.cloud.stream.annotation.Output;
+import org.springframework.messaging.MessageChannel;
+public interface DecisionEventProducerChannel {
+	@Output(<Channel-Name>)
+	MessageChannel messagePublishChannel();
+
+}
+<Channel-Name> is  a unique name which used in Producer config and implementation. If we change the channel name in producer config properties and implementation will not be able to send any message through message channel.
+
+Step 2.
+To send messages using this need to enable bindings in spring boot application. To enable need to add below code in Main application class or where we inject instance to send message.
+@EnableBindings({DecisionEventProducerChannel.class}). 
+
+E.g. Class Implementation:
+@Service
+@EnableBinding({DecisionEventProducerChannel.class})
+public class LoanDecisionEventPublisher {
+	@Autowired
+	private DecisionEventProducerChannel decisionEventProducerChannel;
+
+	public void publishEvent(LoanDetailDto loanDto) {
+		Message<LoanDetailDto> message = MessageBuilder.withPayload(loanDto).build();
+		LOGGER.info(" Sending message to channel : {} ", message);
+		decisionEventProducerChannel.messagePublishChannel().send(message);
+	}
+}
+
+
+
+2.1.7 Consumer Implementation
+
+Consumer implementation has two steps. Create a subscriber channel to establish a connection between message broker queue. Two to create a listener to receive messages from RabbitMQ Broker.
+To enable the spring cloud bindings need to add @EnableBindings({<Consumer_Functional_Interface.class>}). This should be added in main class or the class where implementing StreamListener.
+Step 1. Creating subscribable channel.
+To create a subscriber channel, implement a functional interface with method returns SubscribeableChannel. 
+
+import org.springframework.cloud.stream.annotation.Input;
+import org.springframework.messaging.SubscribableChannel;
+
+public interface LoanDecisionEventConsumerChannel {	
+	@Input(<Channel_Name>)
+	SubscribableChannel decisionSubscribableChannel();
+
+}
+2. Creating stream listener to receive message.
+@EnableBinding({ LoanDecisionEventConsumerChannel.class})
+@Service
+public class LoanDecisionEventListener {
+
+	@StreamListener(value = LoanDecisionEventConsumerChannel.CHANNEL_NAME)
+	public void subscribedMessages(@Payload LoanDetailDto dto) {
+		LOGGER.info("Loan decision event message {}", dto);
+		if (dto.getLoanAmount().compareTo(new BigDecimal(500000L)) > 0) {
+			throw new RuntimeException("Loan amount greater than 500000");
+		}
+
+	}
+}
+
+2.2 Queue Creation and Properties
+
+Queue will be created when a consumer start subscribing an exchange. Queue will be created with the name from the properties configured. By default, if we do not provide consumer-channel-destination or consumer-channel-group in the properties, it will create a random anonymous named queue to receive messages from exchange.
+Best practice is to provide destination and group property in the consumer, so that queue created in the rabbitmq will be durable, non-auto-delete and will have a definite name combination. The queue name is combination of <Consumer-channel-destination-name>.<Consumer-channel-group-name>. It will also help to identify the queue easily in RabbitMQ Management server.
+2.3 Reading DLQ Messages and exceptions
+
+To listen to DLQ, need implement RabbitMQ Queue listener. This can be achieved by using @RabbitListener to create a listener.
+Eg:-
+@Service
+public class DLQReceiver {
+	
+	private static final String ORIGINAL_QUEUE = "spring-boot-exchange.spring-boot-exchange";
+
+	@RabbitListener(queues = DLQ)
+	public void dlqMessageListener(Message failedMessage) {
+
+		
+	}
+}
+
+2.4 Ordering
+
+As a queue message order will be maintained and messages will be served as FIFO order. 
+
+2.5 Prefetch Message
+
+RabbitMQ supports messages to be delivered before a delivered message to be completely consumed. This option enables us to receive the message seamless and always work without time delay. This option is defined in the property prefetch. Value will be number of messages to be prefetched while a message is processing. Below is the property to configure.
+spring.cloud.stream.rabbit.bindings.decisioneventconsumer.consumer.prefetch=
+
+2.7 Exchange Types
+
+There are 4 types of Exchange types available. By default, spring cloud stream take topic exchange.
+Direct Exchanges:
+The Direct exchange type routes messages with a routing key equal to the routing key declared by the binding queue.  The following illustrates how the direct exchange type works:
+   
+ 
+Fanout Exchanges:
+The Fanout exchange type routes messages to all bound queues indiscriminately.  If a routing key is provided, it will simply be ignored.  The following illustrates how the fanout exchange type works:
+ 
+ 
+ 
+The Fanout exchange type is useful for facilitating the publish-subscribe pattern.  When using the fanout exchange type, different queues can be declared to handle messages in different ways.  For instance, a message indicating a customer order has been placed might be received by one queue whose consumers fulfill the order, another whose consumers update a read-only history of orders, and yet another whose consumers record the order for reporting purposes.
+Topic Exchanges:
+The Topic exchange type routes messages to queues whose routing key matches all, or a portion of a routing key.  With topic exchanges, messages are published with routing keys containing a series of words separated by a dot (e.g. “word1.word2.word3”).  Queues binding to a topic exchange supply a matching pattern for the server to use when routing the message.
+ 
+ 
+ 
+The Topic exchange type is useful for directing messages based on multiple categories (e.g. product type and shipping preference ), or for routing messages originating from multiple sources (e.g. logs containing an application name and severity level).
+Headers Exchanges:
+The Headers exchange type routes messages based upon a matching of message headers to the expected headers specified by the binding queue.  The headers exchange type is similar to the topic exchange type in that more than one criteria can be specified as a filter, but the headers exchange differs in that its criteria is expressed in the message headers as opposed to the routing key, may occur in any order, and may be specified as matching any or all of the specified headers.  The following illustrates how the headers exchange type works:
+ 
+ 
+ 
+The Headers exchange type is useful for directing messages which may contain a subset of known criteria where the order is not established and provides a more convenient way of matching based upon the use of complex types as the matching criteria (i.e. a serialized object).
+
+Default Exchanges:
+Spring cloud stream RabbitMQ default implementation to exchanges of type Topic Exchange. If we need to change this to header type exchange, we can provide header-pattern to the queues to receive messages based on header patterns.
+This can be achieved by providing header-patterns property 
+spring.cloud.stream.rabbit.bindings.<consumer-channel-name>.consumer.header-patterns
+As the queue expected to have message header pattern, which publishing a message from producer should also change the implementation to add headers based on message destination.
+Best Practices on Exchange Types: 
+Keep the default exchange type as topic based. If we need multiple queues to receive the same messages, we can provide different group names, such that different queues will be assigned to each receiver side.
+Or we can take header pattern type declaration of queues to consume messages. To support header pattern, we should create a message with the header attached in the messages in the producer side.
+
+2.8 Add exchanges on startup
+
+By default, auto startup is enabled, so that the exchange declared will be created as soon as the producer connects with RabbitMQ Broker. This Boolean is responsible to create exchanges as on startup. If this Boolean is false, an exchange will be declared when a message to be publish via an exchange. If the exchange is not declared to publish a message, then it will create an exchange and message will be delivered.
+
+2.9 Content based stream messaging
+	Another way of receiving messages based on content filtering by the headers. This can help the consumer side to constantly listen to the specific type of messages with header contents. This can help in separate the consumer for the different specific functionality and behavior.
+
+@EnableBinding(Sink.class)
+@EnableAutoConfiguration
+public static class TestPojoWithAnnotatedArguments {
+
+    @StreamListener(target =<input-your-consumer-channel >, condition = "headers['type']=='bogey'")
+    public void receiveBogey(@Payload BogeyPojo bogeyPojo) {
+       // handle the message
+    }
+
+    @StreamListener(target = <input-your-consumer-channel>, condition = "headers['type']=='bacall'")
+    public void receiveBacall(@Payload BacallPojo bacallPojo) {
+       // handle the message
+    }
+}
+
+3. Producer guidelines
+
+For producer best practices, should keep destination and group name.
+Producer channel itself will try to retry for 5 seconds once for establishing connection to RabbitMQ broker.
+In messaging protocol message delivery confirmation is important. RabbitMQ is automatically acknowledge by itself for every message that deliver. 
+By default, configuration of acknowledgement-mode is set to Auto. RabbitMQ broker will create implementation that will automatically acknowledge a message once processed successfully.
+4. Consumer guidelines
+Always provide the destination and group for unique identification of queue.
+Always enable auto dlq. Which help in capturing the errors.
+5. RabbitMQ deployment
+
+RabbitMQ broker is main bridge or routing gate way to pass message from publisher to consumer. This RabbitMQ is an independent server can be deployed as an application or can be containerized in docker.
+1.1 Containerization of RabbitMQ.
+Rabbit MQ server can be installed as an application or can ran as container inside docker. Here we are focusing on deploy or running as docker container.
+Steps to run a RabbitMQ server in docker. RabbitMQ server by default run as normal server with UI. A Management UI to monitor the queues, exchanges and create, delete and push messages to the queue available. If we need this management UI need to enable a plugins rabbitmq-management.
+Step 1 Pulling RabbitMQ image from docker hub. 
+Below command to pull RabbitMQ image for RabbitMQ server without management UI. The below command will pull the latest version available from docker hub. If we need specific version after the image name append colon “:” and add your version details.
+docker pull rabbitmq:3.8.3 or docker pull rabbitmq:latest
+
+to download management UI plugin enabled RabbitMQ image run below command.
+By default, these images will be enabled with rabbit-management plugin enabled and can be accessed with guest/guest as username/password.
+
+docker pull rabbitmq:3.8.3-management
+Step 2 Running RabbitMQ in Docker.
+To run any docker images need to map the port running inside the docker container to outside world
+RabbitMQ by default ports for TCP on 5672 and http on 15672 & 25672.
+Need to map the port outworld to inside dock container. This can be done through port mapping.
+Port mapping can be done using option -p outsideworld_port:inside_docker_port
+E.g. if a server running in 8080 inside docker container. Can be mapped to any port in the hosting system. 
+Can be mapped to -p 8085:8080. This option will give access to docker container service to outside world using 8085. When user try to access the service running inside the docker can be accessed using localhost:8085 not on the port of 8080.
+E.g.:  Running the RabbitMQ image in container. I am mapping the ports same as docker service ports.
+docker run -d --name rabbitmq3.8.3 -p 5672:5672 -p 15672:15672 -p 25672:25672 rabbitmq:3.8.3-management
+Rabbit MQ management can be accessed to outside using same ports. Can be accessed through below url.
+
+http://<host_name>:15672/
+Deploy or running RabbitMQ image in docker.
+
+To run any docker images need to map the port running inside the docker container to outside world
+RabbitMQ by default ports for TCP on 5672 and http on 15672 & 25672.
+Need to map the port outworld to inside dock container. This can be done through port mapping.
+Port mapping can be done using option -p outsideworld_port:inside_docker_port
+E.g. if a server running in 8080 inside docker container. Can be mapped to any port in the hosting system. 
+Can be mapped to -p 8085:8080. This option will give access to docker container service to outside world using 8085. When user try to access the service running inside the docker can be accessed using localhost:8085 not on the port of 8080.
+E.g.:  Running the RabbitMQ image in container. I am mapping the ports same as docker service ports.
+docker run -d --name rabbitmq3.8.3 -p 5672:5672 -p 15672:15672 -p 25672:25672 rabbitmq:3.8.3-management
+Rabbit MQ management can be accessed to outside using same ports. Can be accessed through below url.
+
+http://<host_name>:15672/.
